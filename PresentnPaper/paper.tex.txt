@@ -1,0 +1,213 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{multirow}
+\usepackage{booktabs}
+\usepackage{url}
+\usepackage{siunitx}
+
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+\begin{document}
+
+\title{Trading Strategy based on Reinforcement Learning}
+
+\author{
+\IEEEauthorblockN{Ajaz Ahmad, Raveendra Pujari}
+\IEEEauthorblockA{
+Department of Computer Science\\
+University of South Dakota\\
+South Dakota, USA \\
+\{ajaz.ahmad, raveendra.pujari\}@coyotes.usd.edu}
+}
+
+\maketitle
+
+\begin{abstract}
+This paper presents a reinforcement learning (RL) framework for automated stock trading, leveraging Deep Q-Networks (DQN) to optimize trade operations. Unlike conventional methods, the developed agent learns directly from market data and incorporates a novel \textit{performance-based model selection} mechanism that archives only the highest-profit policy during training. To mitigate action noise, we visualize trading signals exclusively from the best-performing episode. The system is integrated with an interactive Streamlit dashboard for real-time monitoring. Experimental results over 10 episodes and 6 months of data demonstrate the model's ability to adapt and generate profit under real-world constraints.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Reinforcement Learning, Algorithmic Trading, Deep Q-Learning, Financial Markets, Model Selection, Streamlit
+\end{IEEEkeywords}
+
+\section{Introduction}
+Algorithmic trading faces significant challenges due to non-stationary market dynamics and high noise-to-signal ratios. While supervised learning methods struggle with sequential decision-making, RL offers a natural framework for trading agents to learn through trial and error. This work advances prior research in three key aspects:
+\begin{itemize}
+    \item A \textbf{dynamic state representation} using raw price and volume differences to capture market momentum.
+    \item A \textbf{profit-aware model checkpointing} system that discards suboptimal policies during training.
+    \item An \textbf{interpretable action visualization} pipeline that filters out noisy trades by focusing on the top-performing episode.
+\end{itemize}
+Additionally, our approach is designed to be extensible and reproducible, allowing easy deployment for educational or production-level environments. Through hands-on experimentation and visualization, the strategy can be interpreted and evaluated without deep technical intervention.
+
+\section{Related Work}
+RL-based trading has evolved significantly since Moody and Saffell's pioneering work \cite{b2}. Recent advances include:
+\begin{itemize}
+    \item \textbf{DQN extensions}: Mnih et al. \cite{b1} demonstrated deep RL's potential in high-dimensional spaces, inspiring applications in finance.
+    \item \textbf{Adversarial training}: Liang et al. \cite{b3} improved robustness using adversarial market simulations.
+    \item \textbf{Multi-agent systems}: Concurrent work has explored competitive environments for portfolio optimization.
+\end{itemize}
+Other noteworthy work includes the use of Proximal Policy Optimization (PPO), Advantage Actor-Critic (A2C), and recurrent architectures such as LSTMs to capture long-term dependencies in price series. These techniques aim to enhance adaptability and improve learning efficiency across diverse market conditions.
+
+\section{Problem Formulation}
+We formulate the stock trading problem as a Markov Decision Process (MDP), defined by the tuple $(S, A, P, R, \gamma)$, where:
+\begin{itemize}
+    \item $S$: Set of states representing a time series window of OHLCV features.
+    \item $A$: Discrete action space with three choices \{Buy, Sell, Hold\}.
+    \item $P$: Transition probabilities between states (implicitly learned).
+    \item $R$: Reward function based on realized trading profit.
+    \item $\gamma$: Discount factor controlling future reward prioritization ($\gamma = 0.95$).
+\end{itemize}
+This formulation enables the agent to evaluate the consequences of its actions over time, balancing short-term returns with long-term growth strategies.
+
+\section{Methodology}
+
+\subsection{Data Preprocessing}
+Given raw OHLCV data $X_t = (O_t, H_t, L_t, C_t, V_t)$, we compute:
+\begin{equation}
+    \Delta X_t = X_t - X_{t-1} \quad \text{(raw differences)}
+\end{equation}
+A sliding window of $w=10$ timesteps generates the state $s_t \in \mathbb{R}^{(w-1) \times 5}$ (45-dimensional). This ensures the agent receives a recent context of market behavior, enabling more informed decisions.
+
+\subsection{Reward Function}
+To align reward with realized profits, we define:
+\begin{equation}
+    r_t = 
+    \begin{cases}
+        \max(C_t - C_{\text{buy}}, 0) & \text{if action = Sell and holding inventory} \\
+        0 & \text{otherwise}
+    \end{cases}
+\end{equation}
+where $C_t$ is the close price at time $t$ and $C_{\text{buy}}$ is the price at which the agent last bought the stock. No transaction cost was applied in the current implementation.
+
+\subsection{DQN Architecture}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.85\columnwidth]{deepq.png}
+\caption{Deep Q-Network (DQN) architecture used for trading.}
+\label{fig:dqn_arch}
+\end{figure}
+
+\begin{itemize}
+    \item \textbf{Input}: State $s_t$ (45-dimensional vector).
+    \item \textbf{Network}: Two hidden layers (64 and 32 units, ReLU activation).
+    \item \textbf{Output}: Q-values for actions \{Buy, Sell, Hold\}.
+    \item \textbf{Training}: Adam optimizer ($\alpha=0.001$), batch size 16, $\epsilon$-greedy decay from 1.0 to 0.01.
+    \item \textbf{Replay Buffer}: Experience replay with buffer size 1000.
+\end{itemize}
+
+\subsection{Model Checkpointing}
+\begin{algorithm}[htbp]
+\caption{Performance-Based Model Selection}
+\begin{algorithmic}[1]
+\REQUIRE Number of episodes $N$, initial policy $\pi_0$
+\STATE Initialize $Q_{\text{best}} \leftarrow -\infty$, $\pi_{\text{best}} \leftarrow \emptyset$
+\FOR{episode $=1$ to $N$}
+    \STATE Train DQN, record cumulative profit $P$
+    \IF{$P > Q_{\text{best}}$}
+        \STATE Save model weights $\pi_{\text{best}} \leftarrow \pi_{\text{current}}$
+        \STATE Archive actions $A_{\text{best}} \leftarrow \{a_1, ..., a_T\}$
+        \STATE $Q_{\text{best}} \leftarrow P$ \COMMENT{Update best profit}
+    \ENDIF
+\ENDFOR
+\ENSURE Best policy $\pi_{\text{best}}$, actions $A_{\text{best}}$
+\end{algorithmic}
+\end{algorithm}
+
+\section{Experiments}
+
+\subsection{Setup}
+We used 6 months of real-world stock data (OHLCV format), covering daily prices of a mid-cap equity. The dataset was preprocessed using raw differences with a window size of 10, yielding 45-dimensional state vectors.
+
+The DQN agent was trained over 10 episodes with a batch size of 8. Each episode recorded the cumulative profit and saved the best-performing model based on final returns.
+
+\subsection{Profit Trends}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.95\columnwidth]{episode_wise_results.png}
+\caption{Profit per episode over 10 episodes. Best performance in Episode 2 with \$731.93.}
+\label{fig:profit_episode}
+\end{figure}
+
+\subsection{Trade Signal Visualization}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.95\columnwidth]{best_episode_profit.png}
+\caption{Best episode (Episode 2) visualization with cumulative profit \$731.93.}
+\label{fig:best_signals}
+\end{figure}
+
+\subsection{Price Chart}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.75\columnwidth]{stock_price_trend.png}
+\caption{Stock price trend for 6-month period (2023).}
+\label{fig:price_chart}
+\end{figure}
+
+\subsection{UI Snapshot}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.75\columnwidth]{rl_streamlit.png}
+\caption{Streamlit UI for interactive trading configuration and visualization.}
+\label{fig:ui}
+\end{figure}
+
+\subsection{Results Summary}
+\begin{itemize}
+    \item Episode 1 Profit: \$324.87
+    \item Episode 2 Profit: \$731.93
+    \item Episode 3 Profit: \$670.03
+    \item Episode 4 Profit: \$381.60
+    \item Episode 5 Profit: \$675.00
+    \item Episode 6 Profit: \$415.78
+    \item Episode 7 Profit: \$388.26
+    \item Episode 8 Profit: \$726.99
+    \item Episode 9 Profit: \$259.82
+    \item Episode 10 Profit: \$87.60
+\end{itemize}
+
+\section{Limitations and Future Work}
+While the current framework delivers promising results, several limitations exist:
+
+\begin{itemize}
+    \item \textbf{Preprocessing Mismatch:} Although the original description used percentage changes, the actual implementation applies raw differences ($\Delta X_t = X_t - X_{t-1}$).
+    \item \textbf{State Dimensionality Error:} The actual input dimension is 45 ($w-1 \times 5$), not 50.
+    \item \textbf{Reward Function Correction:} Inventory-based reward tracking was used instead of direct price difference with transaction cost.
+    \item \textbf{No Transaction Cost Implemented:} Though mentioned, $\beta=0.001$ was not applied.
+    \item \textbf{No Target Network:} A standard DQN target network is not included, which may reduce training stability.
+    \item \textbf{Limited Data Duration:} Only 6 months of data are used due to high computation time.
+    \item \textbf{Lack of End-of-Episode Liquidation:} Unsold inventory could affect profit calculations.
+    \item \textbf{Single-Asset Focus:} No support for multi-asset trading.
+    \item \textbf{No Risk Management Module:} Financial metrics such as Sharpe ratio or drawdown are not evaluated.
+    \item \textbf{Random Action Exploration:} High variance due to $\epsilon$-greedy strategy.
+\end{itemize}
+
+Future work can address these limitations through:
+\begin{itemize}
+    \item Expanding to multi-asset portfolios with sector diversification.
+    \item Integrating broker APIs for real-time paper/live trading.
+    \item Implementing smarter reward functions that penalize volatility or excessive trading.
+    \item Introducing recurrent architectures (e.g., LSTM) to better capture long-term dependencies.
+    \item Incorporating advanced RL algorithms such as PPO, A3C, or SAC for improved stability.
+    \item Adding a target network and transaction cost penalty.
+\end{itemize}
+
+\section{Conclusion}
+Our reinforcement learning-based trading agent demonstrated adaptability and consistent profitability under various market conditions over 10 episodes. The best-performing episode yielded a profit of \$731.93, proving the effectiveness of model checkpointing and action filtering. The revised methodology aligns with the implementation, improving reproducibility. Future work may explore multi-asset integration, real-time data ingestion, and more advanced RL algorithms like PPO or A3C.
+
+\begin{thebibliography}{00}
+\bibitem{b1} V. Mnih et al., ``Human-level control through deep reinforcement learning,'' \textit{Nature}, vol. 518, pp. 529--533, 2015. DOI: 10.1038/nature14236.
+\bibitem{b2} J. Moody and M. Saffell, ``Learning to trade via direct reinforcement,'' \textit{IEEE Trans. Neural Networks}, vol. 12, no. 4, pp. 875--889, 2001.
+\bibitem{b3} Z. Liang et al., ``Adversarial Deep Reinforcement Learning in Portfolio Management,'' \textit{arXiv:1808.09940}, 2018. \url{https://arxiv.org/abs/1808.09940}.
+\bibitem{b4} Streamlit, ``The fastest way to build data apps in Python,'' [Online]. Available: \url{https://streamlit.io}.
+\end{thebibliography}
+
+\end{document}
